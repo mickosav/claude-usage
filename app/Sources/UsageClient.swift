@@ -22,10 +22,17 @@ struct UsageLimit {
     var isUsed: Bool   // false => "You haven't used X yet"
 }
 
+/// A weekly limit scoped to one model family ("Sonnet", "Fable", ...). claude.ai
+/// shows one row per scoped limit under "Weekly limits"; the set varies by plan.
+struct ScopedLimit {
+    var name: String        // model display name as the API reports it
+    var limit: UsageLimit
+}
+
 struct Usage {
     var session: UsageLimit
     var weeklyAll: UsageLimit
-    var weeklySonnet: UsageLimit?
+    var weeklyScoped: [ScopedLimit]   // in API order; empty if the plan has none
     var planLabel: String?
     var fetchedAt: Date
 }
@@ -123,20 +130,27 @@ final class UsageClient {
         // keys (five_hour/seven_day/...) are the fallback.
         let byKind = (obj["limits"] as? [[String: Any]]) ?? []
 
-        func fromLimits(kind: String, sonnetScope: Bool = false) -> UsageLimit? {
-            let match = byKind.first {
-                guard ($0["kind"] as? String) == kind else { return false }
-                guard sonnetScope else { return true }
-                let model = (($0["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String
-                return model?.lowercased() == "sonnet"
-            }
-            guard let m = match else { return nil }
+        func limit(from m: [String: Any]) -> UsageLimit {
             let pct = (m["percent"] as? NSNumber)?.doubleValue ?? 0
             let resets = Self.parseDate(m["resets_at"] as? String)
             let used = pct > 0 || resets != nil
             return UsageLimit(percent: pct, resetsAt: resets,
                               severity: LimitSeverity(payload: m["severity"] as? String, percent: pct),
                               isUsed: used)
+        }
+
+        func fromLimits(kind: String) -> UsageLimit? {
+            byKind.first { ($0["kind"] as? String) == kind }.map(limit(from:))
+        }
+
+        // Every `weekly_scoped` entry, named by its model's display_name.
+        func scopedFromLimits() -> [ScopedLimit] {
+            byKind.compactMap { m in
+                guard (m["kind"] as? String) == "weekly_scoped" else { return nil }
+                let model = ((m["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String
+                guard let name = model, !name.isEmpty else { return nil }
+                return ScopedLimit(name: name, limit: limit(from: m))
+            }
         }
 
         func fromLegacy(_ key: String) -> UsageLimit? {
@@ -152,9 +166,20 @@ final class UsageClient {
               let weekly = fromLimits(kind: "weekly_all") ?? fromLegacy("seven_day")
         else { throw UsageError.parse }
 
-        let sonnet = fromLimits(kind: "weekly_scoped", sonnetScope: true) ?? fromLegacy("seven_day_sonnet")
+        // Legacy shape only ever had `seven_day_sonnet`; any other `seven_day_<model>`
+        // key is picked up the same way so a new model doesn't vanish from the panel.
+        func scopedFromLegacy() -> [ScopedLimit] {
+            obj.keys.sorted().compactMap { key in
+                guard key.hasPrefix("seven_day_"), let l = fromLegacy(key) else { return nil }
+                let name = String(key.dropFirst("seven_day_".count))
+                return ScopedLimit(name: name.prefix(1).uppercased() + name.dropFirst(), limit: l)
+            }
+        }
 
-        return Usage(session: session, weeklyAll: weekly, weeklySonnet: sonnet,
+        var scoped = scopedFromLimits()
+        if scoped.isEmpty { scoped = scopedFromLegacy() }
+
+        return Usage(session: session, weeklyAll: weekly, weeklyScoped: scoped,
                      planLabel: plan, fetchedAt: Date())
     }
 

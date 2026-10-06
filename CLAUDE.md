@@ -12,7 +12,8 @@ user's own session cookie. Anthropic could change or block these at any time.
 - Menu bar: two stacked monochrome progress bars (top = current session, bottom
   = weekly all-models) plus the session percentage as text.
 - Click: a borderless panel below the icon showing Current session, Weekly "All
-  models", and "Sonnet only", each with a bar, "% used", and reset time, plus a
+  models", and one row per model-scoped weekly limit (e.g. "Fable", "Sonnet";
+  whatever the API returns), each with a bar, "% used", and reset time, plus a
   "Last updated / refresh" footer. Matches the claude.ai usage panel.
 
 ## Build and install
@@ -63,11 +64,14 @@ Uses `SMAppService.mainApp` (macOS 13+). Works best when the app lives in
   `capabilities` contains `"chat"` (fall back to first). `uuid` is the org id;
   `raven_type` (e.g. `team`) becomes the plan label, capitalized -> "Team".
 - `GET https://claude.ai/api/organizations/{uuid}/usage` -> usage. Two shapes:
-  - Legacy top-level keys: `five_hour`, `seven_day`, `seven_day_sonnet`, each
-    `{ utilization: 0-100, resets_at: ISO8601|null }`.
+  - Legacy top-level keys: `five_hour`, `seven_day`, `seven_day_<model>` (e.g.
+    `seven_day_sonnet`), each `{ utilization: 0-100, resets_at: ISO8601|null }`.
   - `limits[]` array (preferred, forward-compatible): each has `kind`
     (`session` / `weekly_all` / `weekly_scoped`), `percent`, `severity`,
-    `resets_at`, and for the scoped one `scope.model.display_name` ("Sonnet").
+    `resets_at`, and for scoped ones `scope.model.display_name` ("Fable",
+    "Sonnet", ...). There can be several `weekly_scoped` entries; the panel
+    shows all of them, titled by display name, in API order. Don't hardcode a
+    model name anywhere in the parser or the UI.
   We read `limits[]` first and fall back to the legacy keys.
 - Auth + headers: `Cookie: sessionKey=...` plus a Safari `User-Agent`, `Referer`,
   `Origin`, and `Sec-Fetch-*` headers to look like a browser request.
@@ -86,6 +90,11 @@ Uses `SMAppService.mainApp` (macOS 13+). Works best when the app lives in
 - `resets_at` has 6-digit microseconds. `ISO8601DateFormatter` with fractional
   seconds can fail on it; `UsageClient.parseDate` trims to milliseconds as a
   fallback.
+- `resets_at` lands just before the boundary (e.g. `04:59:59.999`). claude.ai
+  rounds to the minute ("Resets Tue 5:00 AM", "Resets in 3 hr 7 min"). The
+  formatters in `PopoverView` round the same way: weekly times round to the
+  nearest minute, the session countdown rounds minutes up. Truncating instead
+  showed "4:59 AM" and ran one minute behind the web page.
 - ExFAT breaks `codesign`. This repo lives on `/Volumes/PortableSSD`, which is
   ExFAT and has no native extended attributes, so macOS spills them into
   AppleDouble `._` sidecar files. `codesign` then fails with "Operation not

@@ -6,9 +6,11 @@ struct PopoverView: View {
     var onQuit: () -> Void
 
     // Ticks so relative times stay fresh while the popover is open (label only,
-    // never the network).
-    @State private var now = Date()
-    private let tick = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
+    // never the network). An ObservableObject rather than @State: the macOS 26+
+    // SDK implements @State as a compiler macro whose plugin ships only with
+    // Xcode, so plain swiftc from the Command Line Tools cannot expand it.
+    @ObservedObject private var clock = Clock()
+    private var now: Date { clock.now }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -20,7 +22,6 @@ struct PopoverView: View {
         }
         .padding(18)
         .frame(width: 360)
-        .onReceive(tick) { now = $0 }
     }
 
     private var header: some View {
@@ -63,11 +64,11 @@ struct PopoverView: View {
                              subtitle: Self.weeklyReset(usage.weeklyAll.resetsAt),
                              limit: usage.weeklyAll, notUsedText: nil)
 
-                    if let sonnet = usage.weeklySonnet {
-                        LimitRow(title: "Sonnet only",
-                                 subtitle: sonnet.isUsed ? Self.weeklyReset(sonnet.resetsAt) : nil,
-                                 limit: sonnet,
-                                 notUsedText: sonnet.isUsed ? nil : "You haven't used Sonnet yet")
+                    ForEach(usage.weeklyScoped, id: \.name) { scoped in
+                        LimitRow(title: scoped.name,
+                                 subtitle: scoped.limit.isUsed ? Self.weeklyReset(scoped.limit.resetsAt) : nil,
+                                 limit: scoped.limit,
+                                 notUsedText: scoped.limit.isUsed ? nil : "You haven't used \(scoped.name) yet")
                     }
                 }
         }
@@ -152,11 +153,17 @@ struct PopoverView: View {
 
     // MARK: - Formatting
 
+    // The API's resets_at values sit a hair before the boundary (e.g.
+    // 04:59:59.999). claude.ai rounds to the minute, so it shows "5:00 AM" and
+    // counts down in whole minutes rounded up; truncating here read "4:59 AM"
+    // and ran one minute behind the web page. Round the same way it does.
+
     static func sessionReset(_ date: Date?, now: Date) -> String? {
         guard let date else { return nil }
-        let secs = Int(date.timeIntervalSince(now))
+        let secs = date.timeIntervalSince(now)
         guard secs > 0 else { return "Resetting now" }
-        let h = secs / 3600, m = (secs % 3600) / 60
+        let mins = Int((secs / 60).rounded(.up))
+        let h = mins / 60, m = mins % 60
         if h > 0 { return "Resets in \(h) hr \(m) min" }
         if m > 0 { return "Resets in \(m) min" }
         return "Resets in less than a minute"
@@ -166,7 +173,11 @@ struct PopoverView: View {
         guard let date else { return nil }
         let f = DateFormatter()
         f.dateFormat = "EEE h:mm a"
-        return "Resets \(f.string(from: date))"
+        return "Resets \(f.string(from: Self.roundedToMinute(date)))"
+    }
+
+    static func roundedToMinute(_ date: Date) -> Date {
+        Date(timeIntervalSinceReferenceDate: (date.timeIntervalSinceReferenceDate / 60).rounded() * 60)
     }
 
     static func lastUpdated(since date: Date, now: Date) -> String {
@@ -244,4 +255,19 @@ private struct ProgressBar: View {
         }
         .frame(height: 6)
     }
+}
+
+/// 15-second wall-clock ticker that drives the relative-time labels.
+@MainActor
+private final class Clock: ObservableObject {
+    @Published private(set) var now = Date()
+    private var timer: Timer?
+
+    init() {
+        timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.now = Date() }
+        }
+    }
+
+    deinit { timer?.invalidate() }
 }
