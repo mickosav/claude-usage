@@ -58,6 +58,13 @@ Right-click the menu bar icon -> "Start at login" (checkmark toggles state).
 Uses `SMAppService.mainApp` (macOS 13+). Works best when the app lives in
 `/Applications` and is launched from there.
 
+From a terminal (same toggle; prints the state and exits without showing UI):
+```sh
+/Applications/ClaudeUsage.app/Contents/MacOS/ClaudeUsage --login-item=status   # or on|off
+```
+The registration is keyed by bundle id, so it survives `install.sh` replacing
+the bundle and app relaunches. Verified 2026-10-07.
+
 ## Data source
 
 - `GET https://claude.ai/api/organizations` -> array. Pick the org whose
