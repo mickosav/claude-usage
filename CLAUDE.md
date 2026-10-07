@@ -102,13 +102,20 @@ the bundle and app relaunches. Verified 2026-10-07.
   formatters in `PopoverView` round the same way: weekly times round to the
   nearest minute, the session countdown rounds minutes up. Truncating instead
   showed "4:59 AM" and ran one minute behind the web page.
-- ExFAT breaks `codesign`. This repo lives on `/Volumes/PortableSSD`, which is
-  ExFAT and has no native extended attributes, so macOS spills them into
-  AppleDouble `._` sidecar files. `codesign` then fails with "Operation not
-  permitted / In subcomponent: ...._MacOS". `build.sh` therefore assembles and
-  signs under `TMPDIR` (internal APFS) and `ditto`s the result into `build/`;
-  `install.sh` runs `dot_clean -m` on `/Applications/ClaudeUsage.app` before
-  re-signing. Don't move the signing step back in-tree.
+- ExFAT breaks `codesign`. The repo can be cloned anywhere, so before
+  debugging a signing failure, check which filesystem the clone is on (run from
+  the repo root):
+  ```sh
+  diskutil info "$(df . | awk 'NR==2{print $1}')" | grep Personality
+  ```
+  ExFAT (common on external drives) has no native extended attributes, so
+  macOS spills them into AppleDouble `._` sidecar files. `codesign` then fails
+  with "Operation not permitted / In subcomponent: ...._MacOS". `build.sh`
+  therefore assembles and signs under `TMPDIR` (always internal APFS) and
+  `ditto`s the result into `build/`; `install.sh` runs `dot_clean -m` on
+  `/Applications/ClaudeUsage.app` before re-signing. This works on any
+  filesystem, so keep it even when the clone is on APFS. Don't move the signing
+  step back in-tree.
 - Background `Bash` calls do not keep the working directory. Use absolute paths
   when building from a backgrounded shell.
 - Keychain scanning (`security find-generic-password` / `dump-keychain` to

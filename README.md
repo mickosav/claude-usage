@@ -4,8 +4,9 @@ A small macOS menu bar app that mirrors the claude.ai usage page.
 
 - **Menu bar:** two stacked monochrome bars — top is the current 5-hour session,
   bottom is the weekly all-models limit — plus the session percentage as text.
-- **Click:** a panel showing Current session, Weekly "All models" and "Sonnet
-  only", each with a bar, "% used" and a reset time, plus a refresh footer.
+- **Click:** a panel showing Current session, Weekly "All models" and one row
+  per model-specific weekly limit your plan has, each with a bar, "% used" and
+  a reset time, plus a refresh footer.
 
 ## Unofficial
 
