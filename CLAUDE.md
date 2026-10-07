@@ -80,6 +80,15 @@ the bundle and app relaunches. Verified 2026-10-07.
     shows all of them, titled by display name, in API order. Don't hardcode a
     model name anywhere in the parser or the UI.
   We read `limits[]` first and fall back to the legacy keys.
+- Which model rows to show: when `limits[]` is present it decides on its own.
+  No `weekly_scoped` entry means the plan has no model-scoped limit (e.g. a plan
+  without Fable), so the panel shows none. Legacy `seven_day_*` keys are read
+  only when the response has no `limits` key at all, and only objects with a
+  numeric `utilization` count. The response lists every legacy key even when
+  null, plus non-limit `seven_day_*` keys: `seven_day_breakdown` is a
+  per-surface split (`rows[]` of Claude Code / Chats / ...), not a model. Falling
+  back to legacy keys whenever `limits[]` had no scoped entry once rendered it as
+  a bogus 0% "Breakdown" row.
 - Auth + headers: `Cookie: sessionKey=...` plus a Safari `User-Agent`, `Referer`,
   `Origin`, and `Sec-Fetch-*` headers to look like a browser request.
 
@@ -88,7 +97,8 @@ the bundle and app relaunches. Verified 2026-10-07.
 - Cloudflare blocks `curl`. A raw `curl` to these endpoints returns 403 "Just a
   moment..." because Cloudflare fingerprints the TLS handshake. `URLSession`
   (Apple's TLS stack) passes. Do NOT validate with curl. Use the probe tool:
-  `cd app && SK='sk-ant-sid...' swift probe.swift` prints the org list and raw usage JSON.
+  `cd app && SK='sk-ant-sid...' swift probe.swift` prints the raw usage JSON for
+  every org on the account and marks the one the app uses.
 - Invalid key vs Cloudflare block, both return 403. A rejected session key
   returns 403 with a JSON body containing `account_session_invalid` /
   "Invalid authorization"; a Cloudflare block returns 403 as HTML. Only the JSON

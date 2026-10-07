@@ -41,16 +41,22 @@ Task {
     guard let arr = try? JSONSerialization.jsonObject(with: od) as? [[String: Any]] else {
         print("orgs not array: \(String(body.prefix(300)))"); sem.signal(); return
     }
-    if let first = arr.first,
-       let pretty = try? JSONSerialization.data(withJSONObject: first, options: [.prettyPrinted, .sortedKeys]) {
-        print("--- first org ---")
-        print(String(data: pretty, encoding: .utf8) ?? "")
-        print("--- end org ---")
+    // Same pick as UsageClient.firstOrg: first org with "chat", else the first.
+    let picked = (arr.first { ($0["capabilities"] as? [String])?.contains("chat") == true } ?? arr.first)?["uuid"] as? String
+    // Dump usage for every org so payloads from different plans can be compared.
+    for org in arr {
+        guard let uuid = org["uuid"] as? String else { continue }
+        let mark = uuid == picked ? "  <- app uses this org" : ""
+        print("\n=== org \(uuid) raven_type=\(org["raven_type"] ?? "nil") capabilities=\(org["capabilities"] ?? "nil")\(mark)")
+        let (uc, ud) = await get("https://claude.ai/api/organizations/\(uuid)/usage")
+        print("[usage http=\(uc) bytes=\(ud.count)]")
+        if let obj = try? JSONSerialization.jsonObject(with: ud),
+           let pretty = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]) {
+            print(String(data: pretty, encoding: .utf8) ?? "")
+        } else {
+            print(String(String(data: ud, encoding: .utf8)?.prefix(300) ?? ""))
+        }
     }
-    guard let uuid = arr.first?["uuid"] as? String else { sem.signal(); return }
-    let (uc, ud) = await get("https://claude.ai/api/organizations/\(uuid)/usage")
-    print("[usage http=\(uc) bytes=\(ud.count)]")
-    print(String(data: ud, encoding: .utf8) ?? "")
     sem.signal()
 }
 sem.wait()

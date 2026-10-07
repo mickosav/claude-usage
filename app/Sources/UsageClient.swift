@@ -125,10 +125,16 @@ final class UsageClient {
     private func usage(orgUUID: String, plan: String?, sessionKey: String) async throws -> Usage {
         guard let obj = try await getJSON("/api/organizations/\(orgUUID)/usage", sessionKey: sessionKey) as? [String: Any]
         else { throw UsageError.parse }
+        return try Self.parseUsage(obj, plan: plan)
+    }
 
+    /// Builds `Usage` from a `/usage` response body. Kept apart from the fetch so
+    /// a saved payload can be run through it.
+    static func parseUsage(_ obj: [String: Any], plan: String?) throws -> Usage {
         // The `limits` array is the forward-compatible source; legacy top-level
         // keys (five_hour/seven_day/...) are the fallback.
-        let byKind = (obj["limits"] as? [[String: Any]]) ?? []
+        let limits = obj["limits"] as? [[String: Any]]
+        let byKind = limits ?? []
 
         func limit(from m: [String: Any]) -> UsageLimit {
             let pct = (m["percent"] as? NSNumber)?.doubleValue ?? 0
@@ -168,16 +174,22 @@ final class UsageClient {
 
         // Legacy shape only ever had `seven_day_sonnet`; any other `seven_day_<model>`
         // key is picked up the same way so a new model doesn't vanish from the panel.
+        // Only objects with a numeric `utilization` are limits: other
+        // `seven_day_*` keys aren't (`seven_day_breakdown` is a per-surface split).
         func scopedFromLegacy() -> [ScopedLimit] {
             obj.keys.sorted().compactMap { key in
-                guard key.hasPrefix("seven_day_"), let l = fromLegacy(key) else { return nil }
+                guard key.hasPrefix("seven_day_"),
+                      (obj[key] as? [String: Any])?["utilization"] is NSNumber,
+                      let l = fromLegacy(key) else { return nil }
                 let name = String(key.dropFirst("seven_day_".count))
                 return ScopedLimit(name: name.prefix(1).uppercased() + name.dropFirst(), limit: l)
             }
         }
 
-        var scoped = scopedFromLimits()
-        if scoped.isEmpty { scoped = scopedFromLegacy() }
+        // When `limits` is present it is what claude.ai renders: no `weekly_scoped`
+        // entry means the plan has no model-specific limit, so show no row.
+        // Legacy keys are only consulted when the response has no `limits` at all.
+        let scoped = limits != nil ? scopedFromLimits() : scopedFromLegacy()
 
         return Usage(session: session, weeklyAll: weekly, weeklyScoped: scoped,
                      planLabel: plan, fetchedAt: Date())
